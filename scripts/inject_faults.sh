@@ -20,11 +20,26 @@ ensure_chain() {
 }
 
 add_drop() {
-    local protocol=$1 port=$2
-    ensure_chain
-    if ! iptables -w -C "$CHAIN" -p "$protocol" --dport "$port" -j DROP >/dev/null 2>&1; then
-        iptables -w -A "$CHAIN" -p "$protocol" --dport "$port" -j DROP
+    local protocol=$1 port=$2 destination=${3:-}
+    local -a rule=(-p "$protocol" --dport "$port")
+    if [[ -n $destination ]]; then
+        rule+=(-d "$destination")
     fi
+    rule+=(-j DROP)
+    ensure_chain
+    if ! iptables -w -C "$CHAIN" "${rule[@]}" >/dev/null 2>&1; then
+        iptables -w -A "$CHAIN" "${rule[@]}"
+    fi
+}
+
+valid_ipv4() {
+    local address=$1 octet
+    local -a octets
+    [[ $address =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+    IFS=. read -r -a octets <<< "$address"
+    for octet in "${octets[@]}"; do
+        (( 10#$octet <= 255 )) || return 1
+    done
 }
 
 break_dns() {
@@ -50,17 +65,30 @@ clear_faults() {
     fi
 }
 
+block_backend_ip() {
+    local address
+    read -r -p 'Backend IPv4 address to block: ' address
+    if ! valid_ipv4 "$address"; then
+        printf 'Invalid IPv4 address.\n' >&2
+        return 2
+    fi
+    clear_faults
+    add_drop tcp 443 "$address"
+}
+
 printf '%s\n' \
     '1) Drop outbound HTTPS (TCP 443)' \
-    '2) Drop outbound NTP (UDP 123)' \
+    '2) Drop time sync (UDP 123 and TCP 4460)' \
     '3) Break DNS' \
-    '4) Clear injected faults'
+    '4) Block a backend HTTPS IP; keep DNS available' \
+    '5) Clear injected faults'
 read -r -p 'Select an option: ' choice
 
 case "$choice" in
-    1) add_drop tcp 443 ;;
-    2) add_drop udp 123 ;;
-    3) break_dns ;;
-    4) clear_faults ;;
+    1) clear_faults; add_drop tcp 443 ;;
+    2) clear_faults; add_drop udp 123; add_drop tcp 4460 ;;
+    3) clear_faults; break_dns ;;
+    4) block_backend_ip ;;
+    5) clear_faults ;;
     *) printf 'Invalid option.\n' >&2; exit 2 ;;
 esac
