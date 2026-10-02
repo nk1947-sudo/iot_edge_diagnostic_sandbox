@@ -1,0 +1,16 @@
+[Unit]
+Description=BeagleBone edge telemetry daemon
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/verkada-edge.env
+ExecStart=/usr/bin/python3 /opt/iot_edge_diagnostic_sandbox/edge/verkada_edge.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
